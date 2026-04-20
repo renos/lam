@@ -12,6 +12,12 @@ cd "$REPO_ROOT"
 
 echo "=== lam cluster setup @ $REPO_ROOT ==="
 
+# Force uv to use the project-local .venv/ even if a conda env is active.
+# Without this, uv sees CONDA_PREFIX and installs into the conda env.
+unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PROMPT_MODIFIER CONDA_PYTHON_EXE \
+      CONDA_EXE CONDA_SHLVL VIRTUAL_ENV
+export UV_PROJECT_ENVIRONMENT="$REPO_ROOT/.venv"
+
 # ---------------------------------------------------------------------------
 # 1. uv + pyproject deps
 # ---------------------------------------------------------------------------
@@ -52,8 +58,13 @@ fi
 # the venv's python directly (VENV_PY) to avoid the re-sync.
 # ---------------------------------------------------------------------------
 VENV_PY="$REPO_ROOT/.venv/bin/python"
-echo "[setup] installing molmospaces (editable, no deps)"
-uv pip install -e ./external/molmospaces --no-deps
+if [ ! -x "$VENV_PY" ]; then
+    echo "ERROR: $VENV_PY missing — uv sync failed to create the project venv."
+    echo "       Check for a surrounding conda/virtualenv activation and retry."
+    exit 1
+fi
+echo "[setup] installing molmospaces into .venv (editable, no deps)"
+uv pip install --python "$VENV_PY" -e ./external/molmospaces --no-deps
 
 # ---------------------------------------------------------------------------
 # 4. franka_droid robot assets via molmospaces resource manager
