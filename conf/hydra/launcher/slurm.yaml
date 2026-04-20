@@ -1,0 +1,17 @@
+defaults:
+  - submitit_slurm
+
+# Single GH200 chip per job. Flip gpus_per_node to 4 for a full-node run.
+submitit_folder: slurm_out/%j
+timeout_min: 480
+cpus_per_task: 16
+gpus_per_node: 1
+tasks_per_node: 1
+nodes: 1
+partition: ghx4
+account: becx-dtai-gh
+setup:
+  - "unset LD_LIBRARY_PATH"
+  - "export MUJOCO_GL=egl"
+  - "export GLI_PATH=/tmp"
+  - "source /home/renos/lam/.venv/bin/activate"

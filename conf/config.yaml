@@ -1,0 +1,27 @@
+defaults:
+  - _self_
+  - override hydra/launcher: slurm
+
+# Task + data
+task: MolmoBotTracking
+reference_h5: ${oc.env:HOME}/lam/storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5
+exp_name: v1
+
+# Training scale (single GH200 defaults)
+num_envs: 1024
+num_timesteps: 500_000_000
+
+# Seed (null = random per run)
+seed: null
+
+# Directory layout
+training_results_dir: training_results
+
+hydra:
+  run:
+    dir: .
+  sweep:
+    dir: .
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
