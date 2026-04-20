@@ -70,6 +70,18 @@ if [ ! -x "$VENV_PY" ]; then
     echo "       Check for a surrounding conda/virtualenv activation and retry."
     exit 1
 fi
+
+# Curated subset of molmospaces's transitive deps — enough for the resource
+# manager (R2 download + decompress) and for `import molmo_spaces`. We skip
+# the conflicting heavyweights (jax~=0.6.2, mujoco-mjx==3.4.0, torch,
+# tensorflow, open_clip_torch) because lam pins newer/different versions.
+echo "[setup] installing molmospaces resource-manager transitive deps"
+uv pip install --python "$VENV_PY" \
+    compress-json boto3 zstandard requests tqdm \
+    omegaconf 'pydantic>=2' lxml attrs pyyaml pandas \
+    shapely msgpack msgpack-numpy future stringcase shortuuid \
+    nltk pynvml transforms3d numpy-quaternion jaxlie prior
+
 echo "[setup] installing molmospaces into .venv (editable, no deps)"
 uv pip install --python "$VENV_PY" -e ./external/molmospaces --no-deps
 
