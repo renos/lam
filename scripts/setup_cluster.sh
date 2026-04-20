@@ -80,7 +80,8 @@ uv pip install --python "$VENV_PY" \
     compress-json boto3 zstandard requests tqdm \
     omegaconf 'pydantic>=2' lxml attrs pyyaml pandas \
     shapely msgpack msgpack-numpy future stringcase shortuuid \
-    nltk pynvml transforms3d numpy-quaternion jaxlie prior
+    nltk pynvml transforms3d numpy-quaternion jaxlie prior \
+    molmospaces-resources
 
 echo "[setup] installing molmospaces into .venv (editable, no deps)"
 uv pip install --python "$VENV_PY" -e ./external/molmospaces --no-deps
