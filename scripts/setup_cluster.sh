@@ -3,7 +3,14 @@
 # (e.g. GH200 Delta-AI) so `uv run python train.py --multirun hydra/launcher=slurm`
 # works end-to-end.
 #
-# Run from the repo root:   bash scripts/setup_cluster.sh
+# Recommended invocation (pins uv to the project venv even inside a conda
+# shell, so we never accidentally install into the surrounding env):
+#
+#     uv run bash scripts/setup_cluster.sh
+#
+# Plain `bash scripts/setup_cluster.sh` also works; the CONDA_PREFIX unset
+# below is a belt-and-suspenders fallback.
+#
 # Idempotent; re-running skips anything already in place.
 set -euo pipefail
 
