@@ -46,7 +46,12 @@ fi
 # 3. Install molmospaces editable (deps-less; we only need base_scene.xml and
 #    the resource manager — the full molmospaces dep graph is heavy and not
 #    required for the tracking env).
+#
+# Note: `uv run ...` implicitly re-syncs the venv from uv.lock, which would
+# wipe this editable install.  Anywhere below we need molmo_spaces we use
+# the venv's python directly (VENV_PY) to avoid the re-sync.
 # ---------------------------------------------------------------------------
+VENV_PY="$REPO_ROOT/.venv/bin/python"
 echo "[setup] installing molmospaces (editable, no deps)"
 uv pip install -e ./external/molmospaces --no-deps
 
@@ -56,7 +61,7 @@ uv pip install -e ./external/molmospaces --no-deps
 FRANKA_XML="storage/mlspaces_assets/robots/franka_droid/model.xml"
 if [ ! -f "$FRANKA_XML" ]; then
     echo "[setup] downloading franka_droid assets via molmospaces resource manager"
-    uv run python - <<'PY'
+    "$VENV_PY" - <<'PY'
 from molmo_spaces.molmo_spaces_constants import get_resource_manager
 m = get_resource_manager()
 m.install_packages(["franka_droid"])
@@ -100,7 +105,7 @@ fi
 ITHOR_DIR="storage/mlspaces_assets/scenes/ithor"
 if [ ! -d "$ITHOR_DIR" ]; then
     echo "[setup] downloading iThor scenes (~324 MB) via molmospaces resource manager"
-    uv run python - <<'PY'
+    "$VENV_PY" - <<'PY'
 from molmo_spaces.molmo_spaces_constants import get_resource_manager
 m = get_resource_manager()
 m.install_packages(["ithor"])
