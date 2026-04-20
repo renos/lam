@@ -95,7 +95,7 @@ if [ ! -f "$FRANKA_XML" ]; then
     "$VENV_PY" - <<'PY'
 from molmo_spaces.molmo_spaces_constants import get_resource_manager
 m = get_resource_manager()
-m.install_packages(["franka_droid"])
+m.install_all_for_source("franka_droid")
 print("franka_droid install OK")
 PY
 else
@@ -139,7 +139,7 @@ if [ ! -d "$ITHOR_DIR" ]; then
     "$VENV_PY" - <<'PY'
 from molmo_spaces.molmo_spaces_constants import get_resource_manager
 m = get_resource_manager()
-m.install_packages(["ithor"])
+m.install_all_for_source("ithor")
 print("ithor install OK")
 PY
 else
