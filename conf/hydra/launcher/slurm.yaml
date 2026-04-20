@@ -14,4 +14,8 @@ setup:
   - "unset LD_LIBRARY_PATH"
   - "export MUJOCO_GL=egl"
   - "export GLI_PATH=/tmp"
-  - "source /home/renos/lam/.venv/bin/activate"
+  # When launched via `uv run python train.py ...` on the login node,
+  # submitit inherits sys.executable = <repo>/.venv/bin/python so the SLURM
+  # job already has the right interpreter. We just need env vars here; no
+  # explicit activation required. Override via +hydra.launcher.setup=[...]
+  # if you're on a cluster where the repo path isn't on a shared filesystem.
