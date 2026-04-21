@@ -38,8 +38,23 @@ _ACTION_DIM = 8  # arm 7 + gripper 1
 
 @dataclass
 class Args:
-    reference_h5: str
-    """Path to a single H5 or a directory of H5s (directory = recursive glob)."""
+    reference_h5: str = ""
+    """Path to a single H5 or a directory of H5s (directory = recursive glob).
+    Required when ``stream_from_hf=False``; ignored when streaming."""
+
+    stream_from_hf: bool = False
+    """Pull shards on demand from HuggingFace instead of a local directory.
+    Uses allenai/molmobot-data by default."""
+    hf_repo_id: str = "allenai/molmobot-data"
+    hf_datagen_config: str = "FrankaPickOmniCamConfig"
+    hf_split: str = "train"
+    hf_max_shards: Optional[int] = None
+    """If streaming, cap the number of outer tar shards per epoch."""
+    shuffle_buffer: int = 50_000
+    """Reservoir buffer size for cross-shard shuffling (streaming mode only)."""
+    num_train_batches: Optional[int] = None
+    """If streaming, stop the epoch after this many gradient steps. None =
+    iterate until the shard stream is exhausted."""
 
     exp_name: str = "bc_debug"
     num_epochs: int = 50
@@ -48,7 +63,8 @@ class Args:
     hidden_sizes: tuple[int, ...] = (256, 256, 128)
 
     train_frac: float = 0.95
-    """Fraction of trajectories (not samples) used for training; rest = eval."""
+    """Fraction of trajectories (not samples) used for training; rest = eval.
+    Only applies to the local-dir loader; streaming uses a held-out shard list."""
     seed: int = 0
 
     log_every: int = 50
@@ -141,10 +157,18 @@ def _loss_fn(params, apply_fn, s_t, s_goal, a_t):
 
 
 def train(args: Args) -> None:
+    if args.stream_from_hf:
+        _train_streaming(args)
+        return
+    _train_local_dir(args)
+
+
+def _train_local_dir(args: Args) -> None:
     from latent_mj.envs.molmobot_manipulation.train.molmobot_traj_loader import (
         load_h5_reference_dataset,
     )
 
+    assert args.reference_h5, "reference_h5 required when stream_from_hf=False"
     print(f"loading dataset from {args.reference_h5}")
     traj = load_h5_reference_dataset(args.reference_h5)
     s_t, s_goal, a_t, traj_idx = _triples_from_trajectory(traj)
@@ -257,6 +281,129 @@ def train(args: Args) -> None:
                         import wandb
                         wandb.log({"eval/mse": eval_mse, "eval/best_mse": best_eval},
                                   step=step)
+
+    # Final checkpoint
+    ckpt = {
+        "params": state.params,
+        "normalizer": {"s_t_mean": s_t_mean, "s_t_std": s_t_std,
+                        "g_mean": g_mean, "g_std": g_std},
+        "hidden_sizes": list(args.hidden_sizes),
+    }
+    ckpt_path = logdir / "final_ckpt"
+    ckpt_path.mkdir(parents=True, exist_ok=True)
+    checkpointer = PyTreeCheckpointer()
+    save_args = orbax_utils.save_args_from_target(ckpt)
+    checkpointer.save(str(ckpt_path.resolve()), ckpt, save_args=save_args, force=True)
+    print(f"\nsaved final checkpoint to {ckpt_path}")
+
+    if args.wandb:
+        import wandb
+        wandb.finish()
+
+
+def _train_streaming(args: Args) -> None:
+    """Train BC by streaming shards from HuggingFace one at a time.
+
+    First shard is used to compute input normalization stats; all
+    subsequent shards feed the training loop via a shuffle-buffer.
+    """
+    from latent_mj.utils.dataset.molmobot_hf_stream import (
+        StreamingMolmobotDataset,
+    )
+
+    print(f"streaming {args.hf_repo_id} / {args.hf_datagen_config} / {args.hf_split}  "
+          f"(max_shards={args.hf_max_shards})")
+    ds = StreamingMolmobotDataset(
+        repo_id=args.hf_repo_id,
+        datagen_config=args.hf_datagen_config,
+        split=args.hf_split,
+        max_shards=args.hf_max_shards,
+    )
+
+    # Compute normalizer from the first shard, then restart the stream.
+    print("pre-pass: computing normalizer from first shard...")
+    first_shard_triples: Optional[tuple[np.ndarray, ...]] = None
+    for s, g, a in ds.iter_triples(seed=args.seed):
+        first_shard_triples = (s, g, a)
+        break
+    if first_shard_triples is None:
+        raise RuntimeError("streaming produced no triples on the first shard")
+    fs, fg, _ = first_shard_triples
+    s_t_mean = fs.mean(axis=0)
+    s_t_std = fs.std(axis=0) + 1e-6
+    g_mean = fg.mean(axis=0)
+    g_std = fg.std(axis=0) + 1e-6
+    print(f"  normalizer from {fs.shape[0]:,} samples")
+
+    policy = GoalConditionedPolicy(hidden_sizes=tuple(args.hidden_sizes))
+    rng = jax.random.PRNGKey(args.seed)
+    rng, init_rng = jax.random.split(rng)
+    params = policy.init(init_rng, jnp.zeros((1, fs.shape[1])),
+                         jnp.zeros((1, fg.shape[1])))
+    tx = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(args.learning_rate))
+    state = TrainState.create(apply_fn=policy.apply, params=params, tx=tx)
+
+    @jax.jit
+    def train_step(state, s, g, a):
+        loss, grads = jax.value_and_grad(_loss_fn)(state.params, state.apply_fn, s, g, a)
+        return state.apply_gradients(grads=grads), loss
+
+    # Experiment setup (dirs, wandb).
+    timestamp = datetime.now().strftime("%m%d%H%M")
+    exp_name = f"{timestamp}_BC_stream_{args.exp_name}"
+    logdir = Path(os.environ.get("WANDB_DIR", "/tmp")) / "track_molmobot_bc" / exp_name
+    logdir.mkdir(parents=True, exist_ok=True)
+    print(f"logdir: {logdir}")
+
+    if args.wandb:
+        import wandb
+        wandb.init(
+            project=args.wandb_project, entity=args.wandb_entity, mode=args.wandb_mode,
+            name=exp_name,
+            config={
+                "stream_from_hf": True,
+                "hf_repo_id": args.hf_repo_id,
+                "hf_datagen_config": args.hf_datagen_config,
+                "hf_split": args.hf_split,
+                "hf_max_shards": args.hf_max_shards,
+                "shuffle_buffer": args.shuffle_buffer,
+                "num_epochs": args.num_epochs,
+                "batch_size": args.batch_size,
+                "learning_rate": args.learning_rate,
+                "hidden_sizes": list(args.hidden_sizes),
+                "s_t_dim": fs.shape[1],
+                "goal_dim": fg.shape[1],
+            },
+        )
+
+    step = 0
+    t0 = time.monotonic()
+    samples_seen = 0
+    for epoch in range(args.num_epochs):
+        batch_iter = ds.iter_batches(
+            batch_size=args.batch_size,
+            shuffle_buffer=args.shuffle_buffer,
+            seed=args.seed + epoch,
+        )
+        for s, g, a in batch_iter:
+            s = (s - s_t_mean) / s_t_std
+            g = (g - g_mean) / g_std
+            state, loss = train_step(state, s, g, a)
+            step += 1
+            samples_seen += s.shape[0]
+
+            if step % args.log_every == 0:
+                l = float(loss)
+                sps = samples_seen / max(time.monotonic() - t0, 1e-6)
+                print(f"epoch={epoch:>3d}  step={step:>7d}  train_mse={l:.5f}  samples/s={sps:>9,.0f}")
+                if args.wandb:
+                    import wandb
+                    wandb.log({"train/mse": l, "train/samples_per_sec": sps,
+                               "train/epoch": epoch}, step=step)
+            if args.num_train_batches is not None and step >= args.num_train_batches:
+                break
+        if args.num_train_batches is not None and step >= args.num_train_batches:
+            break
 
     # Final checkpoint
     ckpt = {

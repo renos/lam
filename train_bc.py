@@ -35,7 +35,14 @@ def main(cfg: DictConfig) -> None:
     from latent_mj.learning.train.train_bc_molmobot import Args, train
 
     args = Args(
-        reference_h5=cfg.reference_h5,
+        reference_h5=cfg.get("reference_h5", "") or "",
+        stream_from_hf=bool(cfg.get("stream_from_hf", False)),
+        hf_repo_id=cfg.get("hf_repo_id", "allenai/molmobot-data"),
+        hf_datagen_config=cfg.get("hf_datagen_config", "FrankaPickOmniCamConfig"),
+        hf_split=cfg.get("hf_split", "train"),
+        hf_max_shards=(int(cfg.hf_max_shards) if cfg.get("hf_max_shards") is not None else None),
+        shuffle_buffer=int(cfg.get("shuffle_buffer", 50_000)),
+        num_train_batches=(int(cfg.num_train_batches) if cfg.get("num_train_batches") is not None else None),
         exp_name=cfg.exp_name,
         num_epochs=int(cfg.num_epochs),
         batch_size=int(cfg.batch_size),

@@ -2,8 +2,21 @@ defaults:
   - _self_
   - override hydra/launcher: slurm
 
-# Dataset
+# Dataset — choose one of two modes.
+#
+# Local-dir mode (default): loads all H5s under this path into memory once.
+#   Fast for the ~200K-sample range, needs the full extracted dir on disk.
 reference_h5: ${hydra:runtime.cwd}/storage/molmobot_data_sample/extracted
+
+# Streaming mode: pull shards on demand from HuggingFace. Bounded disk
+# (~2 GB/shard + HF cache). Use for the full multi-TB dataset.
+stream_from_hf: false
+hf_repo_id: allenai/molmobot-data
+hf_datagen_config: FrankaPickOmniCamConfig
+hf_split: train
+hf_max_shards: null   # null = all shards; e.g. 2 for a quick end-to-end test
+shuffle_buffer: 50000
+num_train_batches: null   # null = exhaust shard stream; else cap per epoch
 
 # Training
 exp_name: bc_v1
