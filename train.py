@@ -39,6 +39,12 @@ def main(cfg: DictConfig) -> None:
     # touches the CUDA runtime.
     from latent_mj.learning.train.train_ppo_track_molmobot import Args, train
 
+    def _opt(name, cast=None):
+        v = cfg.get(name)
+        if v is None:
+            return None
+        return cast(v) if cast is not None else v
+
     args = Args(
         reference_h5=cfg.reference_h5,
         task=cfg.task,
@@ -49,6 +55,15 @@ def main(cfg: DictConfig) -> None:
         wandb_project=cfg.get("wandb_project", "lam-molmobot-tracking"),
         wandb_entity=cfg.get("wandb_entity"),
         wandb_mode=cfg.get("wandb_mode", "online"),
+        # PPO overrides (None → keep registered default)
+        entropy_cost=_opt("entropy_cost", float),
+        learning_rate=_opt("learning_rate", float),
+        num_updates_per_batch=_opt("num_updates_per_batch", int),
+        num_minibatches=_opt("num_minibatches", int),
+        batch_size=_opt("batch_size", int),
+        unroll_length=_opt("unroll_length", int),
+        discounting=_opt("discounting", float),
+        clipping_epsilon=_opt("clipping_epsilon", float),
     )
     print(f"Hydra config:\n{OmegaConf.to_yaml(cfg)}")
     print(f"Resolved Args: {args}")

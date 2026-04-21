@@ -49,6 +49,16 @@ class Args:
     wandb_entity: Optional[str] = None
     wandb_mode: str = "online"  # online | offline | disabled
 
+    # PPO hyperparam overrides. None = keep the registered task_config default.
+    entropy_cost: Optional[float] = None
+    learning_rate: Optional[float] = None
+    num_updates_per_batch: Optional[int] = None
+    num_minibatches: Optional[int] = None
+    batch_size: Optional[int] = None
+    unroll_length: Optional[int] = None
+    discounting: Optional[float] = None
+    clipping_epsilon: Optional[float] = None
+
 
 def _setup_paths(exp_name: str) -> Path:
     logdir = Path(WANDB_PATH_LOG) / "track_molmobot" / exp_name
@@ -97,6 +107,22 @@ def train(args: Args) -> None:
     policy_cfg.num_timesteps = args.num_timesteps
     if args.num_envs is not None:
         policy_cfg.num_envs = args.num_envs
+
+    # Apply PPO-hyperparam overrides.
+    _ppo_overrides = {
+        "entropy_cost": args.entropy_cost,
+        "learning_rate": args.learning_rate,
+        "num_updates_per_batch": args.num_updates_per_batch,
+        "num_minibatches": args.num_minibatches,
+        "batch_size": args.batch_size,
+        "unroll_length": args.unroll_length,
+        "discounting": args.discounting,
+        "clipping_epsilon": args.clipping_epsilon,
+    }
+    for k, v in _ppo_overrides.items():
+        if v is not None:
+            setattr(policy_cfg, k, v)
+            print(f"policy_cfg override: {k} = {v}")
     if debug_mode:
         _apply_debug_overrides(policy_cfg)
 

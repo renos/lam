@@ -58,6 +58,22 @@ uv run python train.py --multirun hydra/launcher=slurm \
     num_envs=512,1024,2048 num_timesteps=100_000_000 seed=0,1,2
 ```
 
+### PPO hyperparam sweep (stabilize the entropy-collapse oscillation)
+
+```bash
+cd /home/renos/lam
+uv run python train.py --multirun hydra/launcher=slurm \
+    exp_name=ent_sweep \
+    entropy_cost=0.01,0.03,0.05 \
+    num_updates_per_batch=2,4 \
+    num_timesteps=100_000_000
+```
+
+Any null field in `conf/config.yaml` (`entropy_cost`, `learning_rate`,
+`num_updates_per_batch`, `num_minibatches`, `batch_size`, `unroll_length`,
+`discounting`, `clipping_epsilon`) can be overridden — null keeps whatever
+`molmobot_tracking_task_config()` registered.
+
 ### Full GH200 node (4 chips)
 
 Override on command line:
@@ -86,7 +102,7 @@ Useful for debugging on the interactive box with specific GPUs.
 cd /home/renos/lam
 MUJOCO_GL=egl GLI_PATH=/tmp CUDA_VISIBLE_DEVICES=0,1,6,7 \
   uv run python -u -m latent_mj.learning.train.train_ppo_track_molmobot \
-    --reference-h5 storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5 \
+    --reference-h5 storage/molmobot_data_sample/extracted \
     --num-timesteps 100000 \
     --exp-name debug
 ```
@@ -96,7 +112,7 @@ MUJOCO_GL=egl GLI_PATH=/tmp CUDA_VISIBLE_DEVICES=0,1,6,7 \
 cd /home/renos/lam
 MUJOCO_GL=egl GLI_PATH=/tmp CUDA_VISIBLE_DEVICES=0,1,6,7 \
   uv run python -u -m latent_mj.learning.train.train_ppo_track_molmobot \
-    --reference-h5 storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5 \
+    --reference-h5 storage/molmobot_data_sample/extracted \
     --num-timesteps 5000000 \
     --num-envs 1024 \
     --exp-name warmup

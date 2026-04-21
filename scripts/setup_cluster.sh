@@ -115,45 +115,55 @@ fi
 # Downloads one HF shard (~2 GB), extracts only the house_0 .tar.zst member,
 # zstd-decodes, untars into storage/molmobot_data_sample/extracted/house_0/.
 # All in one Python block — no manual rsync needed.
-SAMPLE_H5="storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5"
-if [ ! -f "$SAMPLE_H5" ]; then
-    echo "[setup] downloading molmobot-data house_0 sample from HuggingFace (~2 GB)"
-    "$VENV_PY" - <<'PY'
-import os, tarfile, tempfile
+# Downloads one HF shard (~2 GB) and extracts EVERY per-house tar.zst into
+# storage/molmobot_data_sample/extracted/house_<N>/. Set MOLMOBOT_MAX_HOUSES to
+# limit (e.g. 5) for a quick test; unset or 0 = unlimited. All in one Python
+# block — no manual rsync needed.
+EXTRACTED_DIR="storage/molmobot_data_sample/extracted"
+H5_COUNT=$(find "$EXTRACTED_DIR" -maxdepth 2 -name "*.h5" 2>/dev/null | wc -l)
+if [ "$H5_COUNT" -lt "2" ]; then
+    echo "[setup] downloading molmobot-data shard from HuggingFace (~2 GB) and extracting all houses"
+    MOLMOBOT_MAX_HOUSES="${MOLMOBOT_MAX_HOUSES:-0}" "$VENV_PY" - <<'PY'
+import io, os, tarfile
 from pathlib import Path
 import zstandard as zstd
 from huggingface_hub import hf_hub_download
 
 REPO = "allenai/molmobot-data"
 SHARD = "FrankaPickOmniCamConfig/train_shards/00000.tar"
-HOUSE_TAR_ZST = "FrankaPickOmniCamConfig_house_0.tar.zst"
 EXTRACT_DIR = Path("storage/molmobot_data_sample/extracted")
 EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
+
+max_houses = int(os.environ.get("MOLMOBOT_MAX_HOUSES", "0"))
 
 print(f"  hf_hub_download {REPO}:{SHARD}")
 shard_path = hf_hub_download(repo_id=REPO, filename=SHARD, repo_type="dataset")
 
-print(f"  extracting {HOUSE_TAR_ZST} from outer tar")
 with tarfile.open(shard_path, "r") as outer:
-    member = outer.getmember(HOUSE_TAR_ZST)
-    with outer.extractfile(member) as zst_stream:
-        zst_bytes = zst_stream.read()
+    house_members = sorted(
+        (m for m in outer.getmembers() if m.name.startswith("FrankaPickOmniCamConfig_house_")
+         and m.name.endswith(".tar.zst")),
+        key=lambda m: int(m.name.split("_house_")[1].split(".")[0]),
+    )
+    if max_houses > 0:
+        house_members = house_members[:max_houses]
+    print(f"  extracting {len(house_members)} per-house tar.zst archives")
 
-print(f"  zstd-decoding ({len(zst_bytes) / 1e6:.1f} MB) and untarring into {EXTRACT_DIR}")
-# Use streaming decompress — molmospaces tars are written without a content
-# size in the zstd frame header, so the one-shot .decompress() can't run.
-import io
-dctx = zstd.ZstdDecompressor()
-with dctx.stream_reader(io.BytesIO(zst_bytes)) as reader:
-    with tarfile.open(fileobj=reader, mode="r|") as inner:
-        inner.extractall(EXTRACT_DIR)
+    dctx = zstd.ZstdDecompressor()
+    for i, m in enumerate(house_members):
+        with outer.extractfile(m) as zst_stream:
+            zst_bytes = zst_stream.read()
+        with dctx.stream_reader(io.BytesIO(zst_bytes)) as reader:
+            with tarfile.open(fileobj=reader, mode="r|") as inner:
+                inner.extractall(EXTRACT_DIR)
+        if (i + 1) % 10 == 0 or (i + 1) == len(house_members):
+            print(f"    {i + 1}/{len(house_members)} houses extracted")
 
-print("  done. H5 files:")
-for p in sorted(EXTRACT_DIR.glob("house_0/*.h5")):
-    print(f"    {p}  ({p.stat().st_size / 1e6:.1f} MB)")
+n_h5 = sum(1 for _ in EXTRACT_DIR.rglob("*.h5"))
+print(f"  done. {n_h5} H5 files under {EXTRACT_DIR}")
 PY
 else
-    echo "[setup] $SAMPLE_H5 already present"
+    echo "[setup] already extracted ($H5_COUNT H5 files under $EXTRACTED_DIR)"
 fi
 
 # ---------------------------------------------------------------------------

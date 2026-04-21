@@ -142,52 +142,74 @@ def load_h5_reference_dataset(
     control_dt: float = 0.02,
     joint_names: Optional[List[str]] = None,
     trim: bool = True,
+    glob_pattern: str = "**/*.h5",
+    max_h5_files: Optional[int] = None,
 ) -> Trajectory:
-    """Load a molmobot H5 file into a Trajectory.
+    """Load one or many molmobot H5 files into a single Trajectory.
 
     Args:
-        h5_path: Path to the H5 file.
-        traj_keys: Which traj groups to load (default: all keys starting with
-            'traj_', in sorted order).
-        control_dt: Control timestep in seconds. Sets info.frequency = 1/control_dt.
-        joint_names: 9 joint name strings. If None, uses the default Panda names
-            ["panda_joint1".."panda_joint7", "panda_finger_joint1",
-            "panda_finger_joint2"]. The caller may need to remap to
-            'robot/'-prefixed names via TrajectoryHandler.filter_and_extend.
-        trim: Whether to trim each trajectory at the first terminated|truncated
-            timestep (+1). Default True.
+        h5_path: Path to a single H5 file OR a directory. If a directory, we
+            recursively glob for files matching ``glob_pattern`` and concat
+            every ``traj_K`` group across all files.
+        traj_keys: Single-file only — which traj groups to load. Ignored for
+            directory inputs (we always take every ``traj_*`` group).
+        control_dt: Control timestep in seconds.
+        joint_names: 9 joint name strings (default: panda_joint1..7 +
+            panda_finger_joint{1,2}).
+        trim: Trim each trajectory at first terminated|truncated+1.
+        glob_pattern: Pattern for directory-mode file discovery.
+        max_h5_files: If set, stop after this many files (handy for debug /
+            curriculum-sized runs without rewriting the reference pool layout).
 
     Returns:
         Trajectory with:
-          data.qpos:         (sum_k T_k, 9) float32
+          data.qpos:         (sum_k T_k, 9) float32 — stacked across ALL trajs
           data.qvel:         (sum_k T_k, 9) float32
           data.split_points: (n_trajs+1,) int64
-          info.joint_names:  9 joint name strings
-          info.model.jnt_type: (9,) int32 array
-          info.frequency:    1 / control_dt
-          info.body_names, info.site_names: None
-          info.metadata:     {'source_h5': str(path), 'traj_keys': [...]}
+          info.metadata:     {
+              'source_h5':       str(path or dir),
+              'source_h5_files': [path, ...],  # one entry in file mode
+              'traj_keys':       [(file_idx, key), ...],
+              'recorded_actions': (sum_k T_k, 8) numpy float32,
+          }
     """
     h5_path = Path(h5_path)
 
-    with h5py.File(h5_path, "r") as f:
-        all_keys = sorted(f.keys())
-        if traj_keys is None:
-            traj_keys = [k for k in all_keys if k.startswith("traj_")]
-        traj_keys = sorted(traj_keys)
+    # Discover H5 files (single-file or directory mode).
+    if h5_path.is_dir():
+        h5_files = sorted(h5_path.glob(glob_pattern))
+        if max_h5_files is not None:
+            h5_files = h5_files[:max_h5_files]
+        assert h5_files, f"no .h5 files found under {h5_path} matching {glob_pattern}"
+        print(f"load_h5_reference_dataset: discovered {len(h5_files)} H5 files "
+              f"under {h5_path}")
+    else:
+        h5_files = [h5_path]
 
-        all_qpos: List[np.ndarray] = []
-        all_qvel: List[np.ndarray] = []
-        all_act: List[np.ndarray] = []
-        traj_lengths: List[int] = []
+    all_qpos: List[np.ndarray] = []
+    all_qvel: List[np.ndarray] = []
+    all_act: List[np.ndarray] = []
+    traj_lengths: List[int] = []
+    source_traj_keys: List[tuple[int, str]] = []
 
-        for key in traj_keys:
-            grp = f[key]
-            qpos, qvel, actions, T = _load_single_traj(grp, trim=trim)
-            all_qpos.append(qpos)
-            all_qvel.append(qvel)
-            all_act.append(actions)
-            traj_lengths.append(T)
+    for file_idx, f_path in enumerate(h5_files):
+        with h5py.File(f_path, "r") as f:
+            all_keys = sorted(f.keys())
+            if h5_path.is_dir() or traj_keys is None:
+                keys_to_load = [k for k in all_keys if k.startswith("traj_")]
+            else:
+                keys_to_load = sorted(traj_keys)
+
+            for key in keys_to_load:
+                qpos, qvel, actions, T = _load_single_traj(f[key], trim=trim)
+                all_qpos.append(qpos)
+                all_qvel.append(qvel)
+                all_act.append(actions)
+                traj_lengths.append(T)
+                source_traj_keys.append((file_idx, key))
+
+    print(f"load_h5_reference_dataset: {len(traj_lengths)} trajectories, "
+          f"{sum(traj_lengths)} total timesteps")
 
     # Stack across all trajectories: (sum_k T_k, 9)
     qpos_all = np.concatenate(all_qpos, axis=0).astype(np.float32)
@@ -233,7 +255,8 @@ def load_h5_reference_dataset(
         site_names=None,
         metadata={
             "source_h5": str(h5_path),
-            "traj_keys": list(traj_keys),
+            "source_h5_files": [str(p) for p in h5_files],
+            "traj_keys": source_traj_keys,
             # 8-dim recorded ctrl per step (arm 7 + gripper 1), stacked the
             # same way as data.qpos/qvel; aligned to data.split_points.
             # Stash as numpy (not jax) since this is metadata, not part of
