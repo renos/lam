@@ -25,6 +25,12 @@ import os
 # mujoco_warp + jax need these set BEFORE any jax/mujoco import.
 os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("GLI_PATH", "/tmp")
+# molmo_spaces' episode_to_mj_model reads this to find robot/object/scene
+# assets. Default to <repo>/storage/mlspaces_assets/ so scene_from_h5 works
+# without extra shell exports.
+_default_assets = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "storage", "mlspaces_assets")
+os.environ.setdefault("MLSPACES_ASSETS_DIR", _default_assets)
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -55,6 +61,9 @@ def main(cfg: DictConfig) -> None:
         wandb_project=cfg.get("wandb_project", "lam-molmobot-tracking"),
         wandb_entity=cfg.get("wandb_entity"),
         wandb_mode=cfg.get("wandb_mode", "online"),
+        # Scene-from-H5 (optional — populates env with one trajectory's objects)
+        scene_from_h5=cfg.get("scene_from_h5"),
+        scene_from_h5_traj_key=cfg.get("scene_from_h5_traj_key", "traj_0"),
         # PPO overrides (None → keep registered default)
         entropy_cost=_opt("entropy_cost", float),
         learning_rate=_opt("learning_rate", float),

@@ -114,11 +114,14 @@ def strip_warp_unsupported_options(spec: mujoco.MjSpec) -> mujoco.MjSpec:
         The same *spec* object, mutated in place, for chaining convenience.
     """
     # mujoco_warp 3.7.0.1 status:
-    #   - mjENBL_MULTICCD: SUPPORTED (kept — important for thin/curved geom
-    #     contacts and matches MolmoSpaces' CPU-MuJoCo data-gen physics).
+    #   - mjENBL_MULTICCD: nominally supported, but incompatible with any
+    #     geom pair having a non-zero margin. iThor scenes use non-zero
+    #     margins on wall/object collision pairs, which trips put_model with
+    #     "non-zero margin with MULTICCD enabled". Simpler to clear it.
     #   - mjENBL_ENERGY:   unsupported (cleared).
     #   - noslip_iterations > 0: unsupported (zeroed; warp has no noslip
     #     projected-Gauss-Seidel solver).
+    spec.option.enableflags &= ~int(mujoco.mjtEnableBit.mjENBL_MULTICCD)
     spec.option.enableflags &= ~int(mujoco.mjtEnableBit.mjENBL_ENERGY)
     spec.option.noslip_iterations = 0
 

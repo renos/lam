@@ -49,6 +49,12 @@ class Args:
     wandb_entity: Optional[str] = None
     wandb_mode: str = "online"  # online | offline | disabled
 
+    # Populate the env's MjModel with objects from a specific recorded
+    # trajectory's scene_modifications (single compile, shared across envs).
+    # None = empty base_scene + franka_droid (current behavior).
+    scene_from_h5: Optional[str] = None
+    scene_from_h5_traj_key: str = "traj_0"
+
     # PPO hyperparam overrides. None = keep the registered task_config default.
     entropy_cost: Optional[float] = None
     learning_rate: Optional[float] = None
@@ -126,7 +132,11 @@ def train(args: Args) -> None:
     if debug_mode:
         _apply_debug_overrides(policy_cfg)
 
-    env = env_class(config=env_cfg)
+    env_kwargs = {"config": env_cfg}
+    if args.scene_from_h5 is not None:
+        env_kwargs["scene_from_h5"] = args.scene_from_h5
+        env_kwargs["scene_from_h5_traj_key"] = args.scene_from_h5_traj_key
+    env = env_class(**env_kwargs)
     traj = env.prepare_trajectory(args.reference_h5)
     n_trajs = int(traj.data.split_points.shape[0]) - 1
     total_steps = int(traj.data.split_points[-1])

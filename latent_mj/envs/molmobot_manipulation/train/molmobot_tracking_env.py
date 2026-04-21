@@ -169,6 +169,8 @@ class MolmoBotTrackingEnv(MolmoBotEnv):
         impl: str = C.DEFAULT_IMPL,
         scene_xml_path: Optional[Path] = None,
         robot_xml_path: Optional[Path] = None,
+        scene_from_h5: Optional[Path] = None,
+        scene_from_h5_traj_key: str = "traj_0",
     ) -> None:
         if config is None:
             config = get_default_tracking_config()
@@ -176,9 +178,12 @@ class MolmoBotTrackingEnv(MolmoBotEnv):
         scene_xml_path = Path(scene_xml_path or C.MOLMOSPACES_BASE_SCENE_XML)
         robot_xml_path = Path(robot_xml_path or C.FRANKA_DROID_XML)
 
-        spec = patch_robot_into_scene(scene_xml_path, robot_xml_path)
-        strip_warp_unsupported_options(spec)
-        mj_model = spec.compile()
+        mj_model = self._build_scene_mj_model(
+            scene_xml_path=scene_xml_path,
+            robot_xml_path=robot_xml_path,
+            scene_from_h5=scene_from_h5,
+            scene_from_h5_traj_key=scene_from_h5_traj_key,
+        )
 
         super().__init__(
             mj_model=mj_model,
@@ -205,6 +210,52 @@ class MolmoBotTrackingEnv(MolmoBotEnv):
         self._ref_qpos: Optional[jp.ndarray] = None     # (total_T, 7)
         self._ref_qvel: Optional[jp.ndarray] = None     # (total_T, 7)
         self._ref_split_points: Optional[jp.ndarray] = None  # (n_trajs+1,)
+
+    @staticmethod
+    def _build_scene_mj_model(
+        scene_xml_path: Path,
+        robot_xml_path: Path,
+        scene_from_h5: Optional[Path],
+        scene_from_h5_traj_key: str,
+    ):
+        """Compile the env's MjModel.
+
+        If ``scene_from_h5`` is set, load that trajectory's recorded
+        scene_modifications (added_objects + object_poses) and compile a full
+        populated scene via ``episode_to_mj_model`` — single compile used for
+        ALL envs, so tracking cost is unchanged. Falls back to the empty
+        base_scene + robot if loading fails (e.g. missing objaverse assets).
+        """
+        if scene_from_h5 is not None:
+            try:
+                from latent_mj.envs.molmobot_manipulation.train.molmobot_data_loader import (
+                    load_h5_trajectory,
+                )
+                from latent_mj.envs.molmobot_manipulation.train.episode_loader import (
+                    episode_to_mj_model,
+                )
+                print(
+                    f"MolmoBotTrackingEnv: loading scene from "
+                    f"{scene_from_h5}:{scene_from_h5_traj_key}"
+                )
+                episode = load_h5_trajectory(
+                    Path(scene_from_h5), traj_key=scene_from_h5_traj_key
+                )
+                mj_model, metadata = episode_to_mj_model(episode)
+                print(
+                    f"  populated scene: {len(metadata.get('added_objects', {}))} "
+                    f"added objects, house_index={metadata.get('house_index')}"
+                )
+                return mj_model
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"MolmoBotTrackingEnv: scene_from_h5 failed ({type(exc).__name__}: {exc}) — "
+                    f"falling back to empty base_scene + franka_droid."
+                )
+
+        spec = patch_robot_into_scene(scene_xml_path, robot_xml_path)
+        strip_warp_unsupported_options(spec)
+        return spec.compile()
 
     # ------------------------------------------------------------------
     # Reference trajectory loading

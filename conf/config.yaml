@@ -8,6 +8,13 @@ task: MolmoBotTracking
 # **/*.h5 and concats every traj_* group across all files — use it after
 # running setup_cluster.sh to pull all houses.
 reference_h5: ${hydra:runtime.cwd}/storage/molmobot_data_sample/extracted
+
+# Optional: populate the env's MjModel with objects from a specific recorded
+# trajectory's scene_modifications. Single compile, shared across all envs.
+# Null = empty base_scene + robot only (fast). Set to an H5 path to load real
+# objects. Falls back to empty scene if objaverse assets aren't installed.
+scene_from_h5: null
+scene_from_h5_traj_key: traj_0
 exp_name: v1
 
 # Training scale (single GH200 defaults)
