@@ -213,8 +213,9 @@ class MolmoBotTrackingEnv(MolmoBotEnv):
     def prepare_trajectory(self, h5_path: Union[str, Path]) -> Trajectory:
         """Load reference trajectories from a molmobot-data H5 file.
 
-        Stores per-step arm qpos/qvel and the trajectory split_points as JAX
-        arrays on self. Returns the underlying Trajectory for inspection.
+        Stores per-step arm qpos/qvel + recorded ctrl actions and the
+        trajectory split_points as JAX arrays on self. Returns the
+        underlying Trajectory for inspection.
         """
         traj = load_h5_reference_dataset(
             h5_path, control_dt=float(self._config.ctrl_dt)
@@ -222,6 +223,12 @@ class MolmoBotTrackingEnv(MolmoBotEnv):
         # Trim to arm joints (first 7 dims).
         self._ref_qpos = jp.array(traj.data.qpos[:, :_N_ARM], dtype=jp.float32)
         self._ref_qvel = jp.array(traj.data.qvel[:, :_N_ARM], dtype=jp.float32)
+        # Recorded 8-dim ctrl actions per step (arm 7 + gripper 1).  Used by
+        # the oracle replay path in scripts/render_molmobot_rollout.py and
+        # available for any future "feedforward" reward terms.
+        self._ref_actions = jp.array(
+            traj.info.metadata["recorded_actions"], dtype=jp.float32
+        )
         self._ref_split_points = jp.array(
             traj.data.split_points, dtype=jp.int32
         )
@@ -346,7 +353,14 @@ class MolmoBotTrackingEnv(MolmoBotEnv):
 
         ctrl = self._action_to_ctrl(action, ref_q_cur)
         data = state.data.replace(ctrl=ctrl)
-        data = mjx.step(self.mjx_model, data)
+        # Advance physics by ctrl_dt (= n_substeps * sim_dt). With ctrl_dt=0.02
+        # and sim_dt=0.002 this is 10 sub-steps per env.step. Without the loop
+        # we'd only advance 2 ms per step and the reference (recorded @ 50 Hz)
+        # would be 10x out of phase with sim time.
+        n_substeps = int(round(self._config.ctrl_dt / self._config.sim_dt))
+        def _one_substep(d, _):
+            return mjx.step(self.mjx_model, d), None
+        data, _ = jax.lax.scan(_one_substep, data, None, length=n_substeps)
 
         # Advance reference index for reward / obs.
         next_step = cur_step + 1

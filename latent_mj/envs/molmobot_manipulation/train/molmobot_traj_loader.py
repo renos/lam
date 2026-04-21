@@ -65,23 +65,46 @@ def _decode_qvel(raw_row: np.ndarray) -> np.ndarray:
     return np.array(vec, dtype=np.float32)
 
 
+def _decode_action(raw_row: np.ndarray) -> np.ndarray:
+    """Decode one uint8 null-padded JSON row → 8-dim float32 action.
+
+    JSON schema: {"arm": [7 floats], "gripper": [1 float]}
+    Result: arm (7) + gripper (1) = 8 dims, matching the franka_droid
+    actuator order. Empty `{}` rows fall back to NaN so downstream code can
+    handle "no command this step" (data-gen sometimes emits sparse cmds).
+    """
+    blob = bytes(raw_row).rstrip(b"\x00")
+    if not blob:
+        return np.full(8, np.nan, dtype=np.float32)
+    d = json.loads(blob.decode())
+    if not d:
+        return np.full(8, np.nan, dtype=np.float32)
+    vec = d.get("arm", []) + d.get("gripper", [])
+    if len(vec) != 8:
+        return np.full(8, np.nan, dtype=np.float32)
+    return np.array(vec, dtype=np.float32)
+
+
 def _load_single_traj(
     grp: h5py.Group,
     trim: bool = True,
-) -> tuple[np.ndarray, np.ndarray, int]:
-    """Decode qpos and qvel arrays for one trajectory group.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Decode qpos, qvel, and recorded actions for one trajectory group.
 
     Args:
         grp: HDF5 group for a single trajectory (e.g. f['traj_0']).
         trim: If True, trim to first timestep where terminated|truncated is True.
 
     Returns:
-        qpos: (T, 9) float32
-        qvel: (T, 9) float32
+        qpos:    (T, 9) float32 — observed joint positions per step
+        qvel:    (T, 9) float32 — observed joint velocities per step
+        actions: (T, 8) float32 — recorded ctrl commands per step (NaN
+                 where no command was issued; forward-fill before use)
         T: number of timesteps kept
     """
-    raw_qpos = np.array(grp["obs/agent/qpos"])  # (T_full, 2000) uint8
-    raw_qvel = np.array(grp["obs/agent/qvel"])  # (T_full, 2000) uint8
+    raw_qpos = np.array(grp["obs/agent/qpos"])      # (T_full, 2000) uint8
+    raw_qvel = np.array(grp["obs/agent/qvel"])      # (T_full, 2000) uint8
+    raw_act = np.array(grp["actions/joint_pos"])    # (T_full, 2000) uint8
     T_full = raw_qpos.shape[0]
 
     if trim:
@@ -93,12 +116,24 @@ def _load_single_traj(
     else:
         T = T_full
 
-    qpos_list = [_decode_qpos(raw_qpos[t]) for t in range(T)]
-    qvel_list = [_decode_qvel(raw_qvel[t]) for t in range(T)]
+    qpos = np.stack([_decode_qpos(raw_qpos[t]) for t in range(T)], axis=0)
+    qvel = np.stack([_decode_qvel(raw_qvel[t]) for t in range(T)], axis=0)
+    actions = np.stack([_decode_action(raw_act[t]) for t in range(T)], axis=0)
 
-    qpos = np.stack(qpos_list, axis=0)  # (T, 9)
-    qvel = np.stack(qvel_list, axis=0)  # (T, 9)
-    return qpos, qvel, T
+    # Forward-fill NaN action rows with the previous step's command (sparse
+    # cmd convention in data-gen).  Bias the first row to the next non-NaN.
+    if np.isnan(actions).any():
+        valid = ~np.isnan(actions).any(axis=1)
+        if not valid.any():
+            actions[:] = 0.0
+        else:
+            first_valid = int(np.argmax(valid))
+            actions[:first_valid] = actions[first_valid]
+            for i in range(first_valid + 1, T):
+                if not valid[i]:
+                    actions[i] = actions[i - 1]
+
+    return qpos, qvel, actions, T
 
 
 def load_h5_reference_dataset(
@@ -143,18 +178,21 @@ def load_h5_reference_dataset(
 
         all_qpos: List[np.ndarray] = []
         all_qvel: List[np.ndarray] = []
+        all_act: List[np.ndarray] = []
         traj_lengths: List[int] = []
 
         for key in traj_keys:
             grp = f[key]
-            qpos, qvel, T = _load_single_traj(grp, trim=trim)
+            qpos, qvel, actions, T = _load_single_traj(grp, trim=trim)
             all_qpos.append(qpos)
             all_qvel.append(qvel)
+            all_act.append(actions)
             traj_lengths.append(T)
 
     # Stack across all trajectories: (sum_k T_k, 9)
     qpos_all = np.concatenate(all_qpos, axis=0).astype(np.float32)
     qvel_all = np.concatenate(all_qvel, axis=0).astype(np.float32)
+    actions_all = np.concatenate(all_act, axis=0).astype(np.float32)
 
     # split_points: cumulative starts, length n_trajs+1
     split_points = np.concatenate(
@@ -196,6 +234,11 @@ def load_h5_reference_dataset(
         metadata={
             "source_h5": str(h5_path),
             "traj_keys": list(traj_keys),
+            # 8-dim recorded ctrl per step (arm 7 + gripper 1), stacked the
+            # same way as data.qpos/qvel; aligned to data.split_points.
+            # Stash as numpy (not jax) since this is metadata, not part of
+            # the staged TrajectoryData payload.
+            "recorded_actions": actions_all,
         },
     )
 

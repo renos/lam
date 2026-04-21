@@ -113,17 +113,13 @@ def strip_warp_unsupported_options(spec: mujoco.MjSpec) -> mujoco.MjSpec:
     Returns:
         The same *spec* object, mutated in place, for chaining convenience.
     """
-    # mujoco_warp's _put_option only handles a subset of mjtEnableBit. Any
-    # bit it doesn't recognize raises NotImplementedError. Clear the ones the
-    # MolmoSpaces base scene sets that warp rejects:
-    #   - mjENBL_MULTICCD (16) — multi-convex-contact-detection (CPU-only)
-    #   - mjENBL_ENERGY   (2)  — energy computation (CPU-only)
-    # Leave other enable bits (FWDINV, ISLAND, etc.) untouched in case future
-    # scenes use ones warp does support.
-    for bit in (mujoco.mjtEnableBit.mjENBL_MULTICCD, mujoco.mjtEnableBit.mjENBL_ENERGY):
-        spec.option.enableflags &= ~int(bit)
-
-    # Zero noslip iterations: warp has no noslip solver.
+    # mujoco_warp 3.7.0.1 status:
+    #   - mjENBL_MULTICCD: SUPPORTED (kept — important for thin/curved geom
+    #     contacts and matches MolmoSpaces' CPU-MuJoCo data-gen physics).
+    #   - mjENBL_ENERGY:   unsupported (cleared).
+    #   - noslip_iterations > 0: unsupported (zeroed; warp has no noslip
+    #     projected-Gauss-Seidel solver).
+    spec.option.enableflags &= ~int(mujoco.mjtEnableBit.mjENBL_ENERGY)
     spec.option.noslip_iterations = 0
 
     return spec

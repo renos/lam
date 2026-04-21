@@ -6,22 +6,39 @@ points at) and Hydra + submitit on SLURM (one job per GH200 chip, supports
 
 ## A. Hydra + SLURM (recommended for real runs)
 
+### One-time cluster setup (uv, no conda)
+
+On the GH200 login node:
+
+```bash
+# Install uv if missing
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+# Create a GH200-native venv and install deps from the lockfile
+cd /projects/becx/renos/lam
+uv sync  # creates .venv/ and installs everything from pyproject + uv.lock
+```
+
+`uv run python train.py ...` on the login node will set `sys.executable` to
+the venv's python; submitit inherits that for the SLURM job, so no conda
+activation is needed. The `setup:` block in `conf/hydra/launcher/slurm.yaml`
+only exports `MUJOCO_GL=egl` / `GLI_PATH=/tmp`.
+
 ### Single GH200 chip, one run
 
 ```bash
-cd /home/renos/lam
-python train.py --multirun hydra/launcher=slurm exp_name=v1
+cd /projects/becx/renos/lam  # or wherever the repo lives
+uv run uv run python train.py --multirun hydra/launcher=slurm exp_name=v1
 ```
 
-This submits one SLURM job to `partition=ghx4` with `gpus_per_node=1`. The
-launcher config is at `conf/hydra/launcher/slurm.yaml` and already activates
-`lam/.venv` and sets `MUJOCO_GL=egl`.
+This submits one SLURM job to `partition=ghx4` with `gpus_per_node=1`.
 
 ### Single GH200, shorter shakeout
 
 ```bash
 cd /home/renos/lam
-python train.py --multirun hydra/launcher=slurm \
+uv run python train.py --multirun hydra/launcher=slurm \
     exp_name=warmup num_envs=512 num_timesteps=10_000_000
 ```
 
@@ -29,7 +46,7 @@ python train.py --multirun hydra/launcher=slurm \
 
 ```bash
 cd /home/renos/lam
-python train.py --multirun hydra/launcher=slurm \
+uv run python train.py --multirun hydra/launcher=slurm \
     exp_name=seed_sweep seed=0,1,2
 ```
 
@@ -37,7 +54,7 @@ python train.py --multirun hydra/launcher=slurm \
 
 ```bash
 cd /home/renos/lam
-python train.py --multirun hydra/launcher=slurm \
+uv run python train.py --multirun hydra/launcher=slurm \
     num_envs=512,1024,2048 num_timesteps=100_000_000 seed=0,1,2
 ```
 
@@ -47,7 +64,7 @@ Override on command line:
 
 ```bash
 cd /home/renos/lam
-python train.py --multirun hydra/launcher=slurm \
+uv run python train.py --multirun hydra/launcher=slurm \
     +hydra.launcher.gpus_per_node=4 exp_name=4gpu_run
 ```
 
@@ -57,7 +74,7 @@ Or edit `conf/hydra/launcher/slurm.yaml` and set `gpus_per_node: 4`.
 
 ```bash
 cd /home/renos/lam
-python train.py exp_name=local_smoke num_envs=256 num_timesteps=5_000_000
+uv run python train.py exp_name=local_smoke num_envs=256 num_timesteps=5_000_000
 ```
 
 ## B. Direct CLI (fast iteration on current machine)
