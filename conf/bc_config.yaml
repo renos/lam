@@ -1,0 +1,32 @@
+defaults:
+  - _self_
+  - override hydra/launcher: slurm
+
+# Dataset
+reference_h5: ${hydra:runtime.cwd}/storage/molmobot_data_sample/extracted
+
+# Training
+exp_name: bc_v1
+num_epochs: 50
+batch_size: 8192
+learning_rate: 3e-4
+hidden_sizes: [256, 256, 128]
+train_frac: 0.95
+seed: 0
+log_every: 50
+eval_every: 500
+
+# Logging
+wandb: true
+wandb_project: lam-molmobot-tracking
+wandb_entity: null
+wandb_mode: online
+
+hydra:
+  run:
+    dir: .
+  sweep:
+    dir: .
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
