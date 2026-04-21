@@ -140,11 +140,12 @@ with tarfile.open(shard_path, "r") as outer:
         zst_bytes = zst_stream.read()
 
 print(f"  zstd-decoding ({len(zst_bytes) / 1e6:.1f} MB) and untarring into {EXTRACT_DIR}")
-inner_tar_bytes = zstd.ZstdDecompressor().decompress(zst_bytes)
-with tempfile.NamedTemporaryFile(suffix=".tar") as tmp:
-    tmp.write(inner_tar_bytes)
-    tmp.flush()
-    with tarfile.open(tmp.name, "r") as inner:
+# Use streaming decompress — molmospaces tars are written without a content
+# size in the zstd frame header, so the one-shot .decompress() can't run.
+import io
+dctx = zstd.ZstdDecompressor()
+with dctx.stream_reader(io.BytesIO(zst_bytes)) as reader:
+    with tarfile.open(fileobj=reader, mode="r|") as inner:
         inner.extractall(EXTRACT_DIR)
 
 print("  done. H5 files:")
