@@ -112,26 +112,45 @@ fi
 # ---------------------------------------------------------------------------
 # 5. molmobot-data sample H5 (reference trajectory pool)
 # ---------------------------------------------------------------------------
-# The training entry defaults to:
-#   storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5
-# Point --reference-h5 at whatever you have on the cluster.
-#
-# Automatic download from HF is non-trivial (shards are nested .tar / .tar.zst).
-# Easiest: rsync from your dev box OR run the manual HF download block below.
+# Downloads one HF shard (~2 GB), extracts only the house_0 .tar.zst member,
+# zstd-decodes, untars into storage/molmobot_data_sample/extracted/house_0/.
+# All in one Python block — no manual rsync needed.
 SAMPLE_H5="storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5"
 if [ ! -f "$SAMPLE_H5" ]; then
-    echo "[setup] NOTE: $SAMPLE_H5 missing"
-    echo "         Populate it via ONE of:"
-    echo "         a) rsync from dev box:"
-    echo "              rsync -av <dev>:/home/renos/lam/storage/molmobot_data_sample/ \\"
-    echo "                         $REPO_ROOT/storage/molmobot_data_sample/"
-    echo "         b) huggingface-cli download (one shard ≈ 2 GB):"
-    echo "              uv run huggingface-cli download allenai/molmobot-data \\"
-    echo "                FrankaPickOmniCamConfig/train_shards/00000.tar \\"
-    echo "                --repo-type dataset \\"
-    echo "                --local-dir storage/molmobot_data_sample/hf_raw"
-    echo "              (then untar the outer, zstd-decode the inner house tar,"
-    echo "               untar into storage/molmobot_data_sample/extracted/)"
+    echo "[setup] downloading molmobot-data house_0 sample from HuggingFace (~2 GB)"
+    "$VENV_PY" - <<'PY'
+import os, tarfile, tempfile
+from pathlib import Path
+import zstandard as zstd
+from huggingface_hub import hf_hub_download
+
+REPO = "allenai/molmobot-data"
+SHARD = "FrankaPickOmniCamConfig/train_shards/00000.tar"
+HOUSE_TAR_ZST = "FrankaPickOmniCamConfig_house_0.tar.zst"
+EXTRACT_DIR = Path("storage/molmobot_data_sample/extracted")
+EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"  hf_hub_download {REPO}:{SHARD}")
+shard_path = hf_hub_download(repo_id=REPO, filename=SHARD, repo_type="dataset")
+
+print(f"  extracting {HOUSE_TAR_ZST} from outer tar")
+with tarfile.open(shard_path, "r") as outer:
+    member = outer.getmember(HOUSE_TAR_ZST)
+    with outer.extractfile(member) as zst_stream:
+        zst_bytes = zst_stream.read()
+
+print(f"  zstd-decoding ({len(zst_bytes) / 1e6:.1f} MB) and untarring into {EXTRACT_DIR}")
+inner_tar_bytes = zstd.ZstdDecompressor().decompress(zst_bytes)
+with tempfile.NamedTemporaryFile(suffix=".tar") as tmp:
+    tmp.write(inner_tar_bytes)
+    tmp.flush()
+    with tarfile.open(tmp.name, "r") as inner:
+        inner.extractall(EXTRACT_DIR)
+
+print("  done. H5 files:")
+for p in sorted(EXTRACT_DIR.glob("house_0/*.h5")):
+    print(f"    {p}  ({p.stat().st_size / 1e6:.1f} MB)")
+PY
 else
     echo "[setup] $SAMPLE_H5 already present"
 fi

@@ -4,7 +4,7 @@ defaults:
 
 # Task + data
 task: MolmoBotTracking
-reference_h5: ${oc.env:HOME}/lam/storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5
+reference_h5: ${hydra:runtime.cwd}/storage/molmobot_data_sample/extracted/house_0/trajectories_batch_4_of_20.h5
 exp_name: v1
 
 # Training scale (single GH200 defaults)
