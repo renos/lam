@@ -25,6 +25,13 @@ unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PROMPT_MODIFIER CONDA_PYTHON_EXE \
       CONDA_EXE CONDA_SHLVL VIRTUAL_ENV
 export UV_PROJECT_ENVIRONMENT="$REPO_ROOT/.venv"
 
+# Tell the molmospaces resource manager to symlink into the path that
+# latent_mj.envs.molmobot_manipulation.constants expects (storage/mlspaces_assets/).
+# The same export needs to be in the SLURM job's setup if you ever override
+# this default — otherwise the env defaults match.
+export MLSPACES_ASSETS_DIR="$REPO_ROOT/storage/mlspaces_assets"
+mkdir -p "$MLSPACES_ASSETS_DIR"
+
 # ---------------------------------------------------------------------------
 # 1. uv + pyproject deps
 # ---------------------------------------------------------------------------
