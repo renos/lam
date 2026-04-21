@@ -45,6 +45,10 @@ def main(cfg: DictConfig) -> None:
         exp_name=cfg.exp_name,
         num_timesteps=int(cfg.num_timesteps),
         num_envs=int(cfg.num_envs) if cfg.num_envs is not None else None,
+        wandb=bool(cfg.get("wandb", False)),
+        wandb_project=cfg.get("wandb_project", "lam-molmobot-tracking"),
+        wandb_entity=cfg.get("wandb_entity"),
+        wandb_mode=cfg.get("wandb_mode", "online"),
     )
     print(f"Hydra config:\n{OmegaConf.to_yaml(cfg)}")
     print(f"Resolved Args: {args}")

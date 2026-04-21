@@ -43,6 +43,12 @@ class Args:
     num_envs: Optional[int] = None
     """Override policy_config.num_envs (handy for small-GPU smoke tests)."""
 
+    wandb: bool = False
+    """If True, wandb.init + log per-progress-tick metrics."""
+    wandb_project: str = "lam-molmobot-tracking"
+    wandb_entity: Optional[str] = None
+    wandb_mode: str = "online"  # online | offline | disabled
+
 
 def _setup_paths(exp_name: str) -> Path:
     logdir = Path(WANDB_PATH_LOG) / "track_molmobot" / exp_name
@@ -111,6 +117,25 @@ def train(args: Args) -> None:
 
     last_steps = [0]
 
+    if args.wandb:
+        import wandb
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            mode=args.wandb_mode,
+            name=exp_name,
+            config={
+                "task": args.task,
+                "num_envs": args.num_envs or policy_cfg.num_envs,
+                "num_timesteps": args.num_timesteps,
+                "reference_h5": args.reference_h5,
+                "n_reference_trajs": int(traj.data.split_points.shape[0]) - 1,
+                "n_reference_steps": int(traj.data.split_points[-1]),
+                "obs_size": dict(env.observation_size),
+                "action_size": int(env.action_size),
+            },
+        )
+
     def _progress(num_steps: int, metrics: dict) -> None:
         now = time.monotonic()
         times.append(now)
@@ -128,6 +153,12 @@ def train(args: Args) -> None:
                 f"v_loss={r('training/v_loss'):+7.4f}  "
                 f"std={r('training/policy_dist_mean_std'):5.3f}"
             )
+            if args.wandb:
+                import wandb
+                log = {k: float(v) for k, v in metrics.items()
+                       if hasattr(v, "__float__") or isinstance(v, (int, float))}
+                log["wallclock/sps"] = sps
+                wandb.log(log, step=num_steps)
         last_steps[0] = num_steps
 
     make_inference_fn, params, _ = train_fn(
@@ -142,6 +173,10 @@ def train(args: Args) -> None:
         print(f"Train wall-time: {times[-1] - times[1]:.2f}s")
 
     print(f"Run {exp_name} done. Checkpoint: {ckpt_path}")
+
+    if args.wandb:
+        import wandb
+        wandb.finish()
 
 
 if __name__ == "__main__":
